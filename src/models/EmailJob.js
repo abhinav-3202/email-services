@@ -31,6 +31,9 @@ const emailJobSchema = new Schema({
         required:true,
         unique:true,
     },
+    providerMessageId:{
+        type:String,
+    },
 },
     {
         timestamps:true,
