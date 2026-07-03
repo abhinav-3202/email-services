@@ -103,5 +103,86 @@ app.post('/emails', async (req,res)=>{
     }
 })
 
+app.get('/emails/failed', async(req,res)=>{
+    try{
+        const failedEmails = await EmailJob.find({ status: 'failed' }).sort({ updatedAt:-1});
+        if(failedEmails.length === 0){
+            return res.status(200).json({
+                success: true,
+                message: 'No failed emails found',
+                failedEmails: [],
+            })
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Failed emails retrieved successfully',
+            failedEmails: failedEmails,
+        })
+    }catch(error){
+        return res.status(500).json({
+            success: false,
+            message: 'Error retrieving failed emails',
+            error: error.message,
+        })
+    }
+})
+
+app.post('/emails/retry/:jobId', async(req,res)=>{
+    try{
+
+        const { jobId } = req.params;
+        const emailJob = await EmailJob.findById(jobId);
+        if(!emailJob){
+            return res.status(404).json({
+                success: false,
+                message: 'Email job not found',
+            })
+        }
+
+        if(emailJob.status !== 'failed'){
+            return res.status(400).json({
+                success: false,
+                message: 'Email job is not in failed status',
+            })
+        }
+
+        emailJob.status = 'pending';  // here we are restting the old vlaues to make it a fresh job
+        emailJob.lastError = undefined;
+        emailJob.attempts = 0;
+        await emailJob.save();
+
+        await emailQueue.add(
+            'send-email',{
+                mongoId:emailJob._id,
+                to:emailJob.to,
+                subject:emailJob.subject,
+                body:emailJob.body,
+            },{
+                jobId:`${emailJob.idempotencyKey}-retry-${Date.now()}`, // we here use a retry job new id so that redis treats this as new job
+                attempts:5,
+                backoff:{
+                    type:'exponential',
+                    delay:20000, // 20 seconds
+                    jitter:0.5
+                }
+            }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: 'Email job retried successfully',
+            jobId:emailJob._id,
+        })
+
+    }catch(error){
+        return res.status(500).json({
+            success: false,
+            message: 'Error retrying failed email',
+            error: error.message,
+        })
+    }
+})
+
 
 export {app};
