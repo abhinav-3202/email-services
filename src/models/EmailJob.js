@@ -36,3 +36,5 @@ const emailJobSchema = new Schema({
         timestamps:true,
     },
 )
+
+export const EmailJob = mongoose.model("EmailJob", emailJobSchema);

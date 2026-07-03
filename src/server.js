@@ -2,6 +2,8 @@ import express from 'express';
 // import cors from 'cors';
 import dotenv from 'dotenv';
 import { resend } from './lib/resend.js';
+import {EmailJob} from './models/EmailJob.js';
+import {emailQueue} from './queue.js';
 
 dotenv.config({path: './.env'});
 
@@ -10,14 +12,85 @@ app.use(express.json());
 
 app.post('/emails', async (req,res)=>{
     try{
-        const { email, subject, body } = req.body;
-        await resend.emails.send({
-            from: 'Acme <onboarding@resend.dev>',
+        const { email, subject, body , idempotencyKey } = req.body;
+
+        if(!email || !subject || !body || !idempotencyKey){
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required fields',
+            })
+        }
+
+        const existingEmailJob = await EmailJob.findOne({ idempotencyKey: idempotencyKey });
+
+        if(existingEmailJob){
+            return res.status(200).json({
+                success: true,
+                message: 'The work has already been done.',
+                jobId:existingEmailJob._id,
+            })
+        }
+
+        const newJob = new EmailJob({
             to: email,
             subject: subject,
-            html:body
+            body: body,
+            idempotencyKey: idempotencyKey,
+            status: 'pending',
         })
-        res.status(200).json({ message: 'Email sent successfully' });
+
+        // await newJob.save();
+        // as nodeJS is asynchronous, if i double-click the send button,or i retry a failed req within milliseconds, two HTTP req will run in parallel
+        // as mongoDB is single threaded at doucmnet level , it processes the acutal inserts one after another
+        // milisec later 2 req tries to save the same key and schema has unique:true, mongoDB rejects with 11000 error code 
+        // 11000 --->> duplicate key error 
+
+        try{
+            await newJob.save();
+        }catch(dberror){
+            if(dberror.code === 11000){
+                const parallelExistingJob = await EmailJob.findOne({ idempotencyKey: idempotencyKey });
+                return res.status(200).json({
+                    success: true,
+                    message: 'The work has already been done.',
+                    // jobId:parallelExistingJob._id,
+                })
+            }
+            throw dberror;
+        }
+
+        // the next part is for adding the job into the queue for processing by worker.js, 
+        try{
+            await emailQueue.add(
+                'send-email',{
+                    mongoId:newJob._id,
+                    to:email,
+                    subject:subject,
+                    body:body,
+                },
+                {
+                    jobId:idempotencyKey, // this is to ensure that if the same job is added again, it will not be added again to the queue
+                }
+            )
+        }catch(error){ // if addin to queue fails 
+            console.log('Error adding job to the queue:', error);
+            newJob.status = 'failed';
+            newJob.lastError = error.message || 'Unknown error';
+            await newJob.save();
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to add email job to the queue',
+                error:error.message,
+            })
+        }
+
+        return res.status(202)
+        .json({
+            success: true,
+            message: 'Email job added to the queue for processing',
+            jobId:newJob._id,
+        });
+        // res.status(200).json({ message: 'Email sent successfully' });
     } catch (error) {
         console.error('Error sending email:', error);
         res.status(500).json({ message: 'Error sending email' });
