@@ -70,6 +70,12 @@ app.post('/emails', async (req,res)=>{
                 },
                 {
                     jobId:idempotencyKey, // this is to ensure that if the same job is added again, it will not be added again to the queue
+                    attempts:5,
+                    backoff:{
+                        type:'exponential',
+                        delay:20000, // 20 seconds
+                        jitter:0.5 
+                    }
                 }
             )
         }catch(error){ // if addin to queue fails 

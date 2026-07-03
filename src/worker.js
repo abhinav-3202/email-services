@@ -63,5 +63,9 @@ const worker = new Worker('emailQueue', async (job) => {
     }
 }, 
 {
-    connection: EmailQueue.opts.connection 
+    connection: EmailQueue.opts.connection,
+    limiter:{  // this is for limiting email sent , so that not to exceed the limit to the service provider 
+        max:10,
+        duration:1000 // 10 emials per sec
+    }
 });
