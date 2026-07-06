@@ -1,15 +1,20 @@
 import { EmailJob } from "./models/EmailJob.js";
-import {EmailQueue} from './queue.js';
+import {emailQueue} from './queue.js';
 import {Worker,QueueEvents} from 'bullmq';
+import connectDB from './db/index.js';
+import dotenv from 'dotenv';
 import { resend } from "./lib/resend.js";
 
-const queueEvents = new QueueEvents('emailQueue', { connection: EmailQueue.opts.connection });
+dotenv.config({path: './.env'});
+connectDB();
+
+// const queueEvents = new QueueEvents('emailQueue', { connection: emailQueue.opts.connection });
 
 // this job is coming fromt the redis queue
 const worker = new Worker('emailQueue', async (job) => {
 
     const { to, subject, body,mongoId } = job.data;
-    if(!to || !subject || !body || !mongoId || !jobId) {
+    if(!to || !subject || !body || !mongoId ) {
         throw new Error('Missing required fields in job data');
     }
 
@@ -63,9 +68,10 @@ const worker = new Worker('emailQueue', async (job) => {
     }
 }, 
 {
-    connection: EmailQueue.opts.connection,
+    connection: emailQueue.opts.connection,
     limiter:{  // this is for limiting email sent , so that not to exceed the limit to the service provider 
         max:10,
         duration:1000 // 10 emials per sec
     }
 });
+
