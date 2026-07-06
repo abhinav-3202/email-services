@@ -16,7 +16,7 @@ const emailJobSchema = new Schema({
     },
     status:{
         type:String,
-        enum:["pending", "sent", "failed"],
+        enum:["pending", "sent", "failed","delivered"],
         default:"pending",
     },
     attempts:{
@@ -33,6 +33,7 @@ const emailJobSchema = new Schema({
     },
     providerMessageId:{
         type:String,
+        index:true,
     },
 },
     {

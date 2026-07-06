@@ -184,5 +184,146 @@ app.post('/emails/retry/:jobId', async(req,res)=>{
     }
 })
 
+app.get('/emails/stats', async (req, res) => {
+    try {
+        const stats = await EmailJob.aggregate([
+            {
+                $facet: {//allows to run multiple independent aggregation pipelines in parallel on same set of documents
+                    // Branch 1: Group and count jobs by their current status
+                    statusCounts: [
+                        {
+                            $group: {// combine multiple documents into single based on sepcified identifier 
+                                _id: "$status",// identifier
+                                count: { $sum: 1 } // instead use count: {$count:{}}
+                            } // by documentation , 2nd one is easy 
+                        }
+                    ],
+                    // Branch 2: Calculate global summary metrics across the whole collection
+                    globalMetrics: [
+                        {
+                            $group: {
+                                _id: null,
+                                totalJobs: { $count:{}}, // instead we can use 
+                                avgAttempts: { $avg: "$attempts" }
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                // Stage 2: Reshape the output so it looks like a clean API response
+                $project: {
+                    totalJobs: { 
+                        $ifNull: [ { $arrayElemAt: ["$globalMetrics.totalJobs", 0] }, 0 ] 
+                    },
+                    averageAttempts: { 
+                        $round: [ { $ifNull: [ { $arrayElemAt: ["$globalMetrics.avgAttempts", 0] }, 0 ] }, 2 ] 
+                    },
+                    statuses: "$statusCounts"
+                }
+            }
+        ]);
 
+        // Reason why used avg attempts is beacuse :
+        // 1. total emails: 10000 failed :0 , avg attempts:1
+        // 2. total emails: 10000 failed :0 , avg attempts:4.2
+        // in both cases , the emails are sent successfully but in 2nd case, further checking is needed because it is close to our upper lomit of 5 
+
+        // MongoDB aggregation always returns an array, extract our single results object
+        const result = stats[0] || { totalJobs: 0, averageAttempts: 0, statuses: [] };
+
+        // Convert the statuses array into a clean key-value object (e.g., { pending: 5, sent: 20 })
+        const formattedStatuses = { pending: 0, sent: 0, failed: 0 };
+        result.statuses.forEach(item => {
+            if (item._id) formattedStatuses[item._id] = item.count;
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                totalJobs: result.totalJobs,
+                averageAttempts: result.averageAttempts,
+                statusCounts: formattedStatuses
+            }
+        });
+
+    } catch (error) {
+        console.error('Failed to fetch system stats:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+});
+
+app.post('/webhooks/resend',async(req,res)=>{
+
+    try{
+        const payload = JSON.stringify(req.body);
+        let event;
+
+        try{
+            event = resend.webhooks.verify({
+                payload,
+                headers:{
+                    'svix-id':req.headers['svix-id'],
+                    'svix-timestamp':req.headers['svix-timestamp'],
+                    'svix-signature':req.headers['svix-signature'],
+                },
+                secret:process.env.RESEND_WEBHOOK_SECRET,
+            })
+        }catch(error){
+                console.log('Webhook verification failed:', error);
+                return res.status(400).
+                        json({ message: 'Webhook verification failed' });
+        }
+
+        const {type, data} = event;
+
+        const providerMessageId = data?.id || data?.email_id;
+
+        if(!providerMessageId){
+            console.log('Missing providerMessageId in webhook event data');
+            return res
+            .status(400)
+            .json({ message: 'Missing providerMessageId in webhook event data' });
+        }
+
+        const emailJob = await EmailJob.findOne({providerMessageId});
+        if(!emailJob){
+            console.log('Email job not found for providerMessageId:', providerMessageId);
+            return res
+            .status(404)
+            .json({ message: 'Email job not found for providerMessageId' });
+        }
+
+        switch(type){
+            case 'email.delivered':
+                emailJob.status = 'delivered';
+                break;
+            case 'email.bounced':
+                emailJob.status = 'failed';
+                emailJob.lastError = data?.reason || 'Unknown provider error';
+                break;
+            case 'email.complained':
+                emailJob.status = 'failed';
+                emailJob.lastError = data?.reason || 'Unknown provider error';
+                break;
+            default:// for any other event lie email.opened , email.clicked etc ,so if we keep status as 400 it will retry after some attempts 
+                console.log('Unhandled webhook event type:', type);
+                return res
+                .status(200)
+                .json({ message: 'Unhandled webhook event type' });
+        }
+
+        await emailJob.save();
+        return res
+        .status(200)
+        .json({ message: 'Webhook processed successfully' });
+
+    }catch(error){
+        console.error('Error processing webhook:', error);
+        return res
+        .status(500)
+        .json({ message: 'Error processing webhook' });
+    }
+
+})
 export {app};
