@@ -1,14 +1,18 @@
+import dotenv from 'dotenv';
+dotenv.config({path: './.env'});
 import express from 'express';
 // import cors from 'cors';
-import dotenv from 'dotenv';
 import { resend } from './lib/resend.js';
 import {EmailJob} from './models/EmailJob.js';
 import {emailQueue} from './queue.js';
 
-dotenv.config({path: './.env'});
-
+// console.log('Environment variables loaded:', process.env.RESEND_WEBHOOK_SECRET);
 const app = express();
-app.use(express.json());
+app.use(express.json({
+    verify: (req, res, buf) => {
+        req.rawBody = buf.toString();
+    }
+}));
 
 app.post('/emails', async (req,res)=>{
     try{
@@ -256,21 +260,22 @@ app.get('/emails/stats', async (req, res) => {
 app.post('/webhooks/resend',async(req,res)=>{
 
     try{
-        const payload = JSON.stringify(req.body);
+        const payload =  req.rawBody;
         let event;
         // console.log('Received webhook event:', payload);
+        // console.log('DEBUG secret in server.js:', JSON.stringify(process.env.RESEND_WEBHOOK_SECRET));
         try{
             event = resend.webhooks.verify({
                 payload,
                 headers:{
-                    'svix-id':req.headers['svix-id'],
-                    'svix-timestamp':req.headers['svix-timestamp'],
-                    'svix-signature':req.headers['svix-signature'],
+                    id:req.headers['svix-id'],
+                    timestamp:req.headers['svix-timestamp'],
+                    signature:req.headers['svix-signature'],
                 },
-                secret:process.env.RESEND_WEBHOOK_SECRET,
+                webhookSecret:process.env.RESEND_WEBHOOK_SECRET,
             })
             // console.log(event.data.secret,process.env.RESEND_WEBHOOK_SECRET);
-            console.log('the secret is :',event.data.secret);
+            // console.log('the secret is :',event.data.secret);
         }catch(error){
                 console.log('Webhook verification failed:', error);
                 return res.status(400).
