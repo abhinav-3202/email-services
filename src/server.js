@@ -73,7 +73,7 @@ app.post('/emails', async (req,res)=>{
                     attempts:5,
                     backoff:{
                         type:'exponential',
-                        delay:20000, // 20 seconds
+                        delay:2000, // 20 seconds
                         jitter:0.5 
                     }
                 }
@@ -163,7 +163,7 @@ app.post('/emails/retry/:jobId', async(req,res)=>{
                 attempts:5,
                 backoff:{
                     type:'exponential',
-                    delay:20000, // 20 seconds
+                    delay:2000, // 20 seconds
                     jitter:0.5
                 }
             }
@@ -258,7 +258,7 @@ app.post('/webhooks/resend',async(req,res)=>{
     try{
         const payload = JSON.stringify(req.body);
         let event;
-
+        // console.log('Received webhook event:', payload);
         try{
             event = resend.webhooks.verify({
                 payload,
@@ -269,6 +269,8 @@ app.post('/webhooks/resend',async(req,res)=>{
                 },
                 secret:process.env.RESEND_WEBHOOK_SECRET,
             })
+            // console.log(event.data.secret,process.env.RESEND_WEBHOOK_SECRET);
+            console.log('the secret is :',event.data.secret);
         }catch(error){
                 console.log('Webhook verification failed:', error);
                 return res.status(400).
