@@ -38,6 +38,7 @@ const worker = new Worker('emailQueue', async (job) => {
         if(emailResponse.data?.id){
             emailJob.status = 'sent';
             emailJob.providerMessageId = emailResponse.data.id; // this we are stroing for server to server verificaation via webhooks 
+            console.log('email messageProviderId is :',emailResponse.data.id);
             await emailJob.save();
             return{
                 success: true,

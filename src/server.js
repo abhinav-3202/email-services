@@ -77,7 +77,7 @@ app.post('/emails', async (req,res)=>{
                     attempts:5,
                     backoff:{
                         type:'exponential',
-                        delay:2000, // 20 seconds
+                        delay:1000, // 20 seconds
                         jitter:0.5 
                     }
                 }
@@ -167,7 +167,7 @@ app.post('/emails/retry/:jobId', async(req,res)=>{
                 attempts:5,
                 backoff:{
                     type:'exponential',
-                    delay:2000, // 20 seconds
+                    delay:1000, // 20 seconds
                     jitter:0.5
                 }
             }
